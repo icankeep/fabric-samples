@@ -129,6 +129,9 @@ infoln "Installing chaincode on peer0.org1..."
 installChaincode 1
 infoln "Install chaincode on peer0.org2..."
 installChaincode 2
+infoln "Install chaincode on peer0.org2..."
+installChaincode 3
+infoln "Install chaincode on peer0.org3..."
 
 ## query whether the chaincode is installed
 queryInstalled 1

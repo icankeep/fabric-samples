@@ -56,13 +56,13 @@ public final class AssetTransfer implements ContractInterface {
     public void InitLedger(final Context ctx) {
         ChaincodeStub stub = ctx.getStub();
 
-        CreateAsset(ctx, "A-wallet", "money", new BigDecimal("5000.0"), "A");
-        CreateAsset(ctx, "B-wallet", "money", new BigDecimal("5000.0"), "B");
-        CreateAsset(ctx, "asset1", "water", new BigDecimal("1000.0"), "A");
-        CreateAsset(ctx, "asset3", "medicine", new BigDecimal("6000.0"), "A");
-        CreateAsset(ctx, "asset2", "clothes", new BigDecimal("2000.0"), "B");
-        CreateAsset(ctx, "asset5", "glass", new BigDecimal("4000.0"), "bank");
-        CreateAsset(ctx, "asset6", "desk", new BigDecimal("3000.0"), "port");
+        CreateAsset(ctx, "A-wallet", "money", new BigDecimal("5000.0"), "peer0.org3");
+        CreateAsset(ctx, "B-wallet", "money", new BigDecimal("5000.0"), "peer1.org3");
+        CreateAsset(ctx, "asset1", "water", new BigDecimal("1000.0"), "peer0.org3");
+        CreateAsset(ctx, "asset3", "medicine", new BigDecimal("6000.0"), "peer0.org3");
+        CreateAsset(ctx, "asset2", "clothes", new BigDecimal("2000.0"), "peer1.org3");
+        CreateAsset(ctx, "asset5", "glass", new BigDecimal("4000.0"), "peer0.org2");
+        CreateAsset(ctx, "asset6", "desk", new BigDecimal("3000.0"), "peer0.org1");
 
     }
 
@@ -128,6 +128,10 @@ public final class AssetTransfer implements ContractInterface {
      */
     @Transaction(intent = Transaction.TYPE.SUBMIT)
     public Asset UpdateAsset(final Context ctx, final String assetID, final String type, final BigDecimal price, final String owner) {
+        String clientId = ctx.getClientIdentity().getId();
+        if (!clientId.equals(owner)) {
+            throw new ChaincodeException("auth failed, " + clientId + " cannot update " + owner + "'s asset");
+        }
         ChaincodeStub stub = ctx.getStub();
 
         if (!AssetExists(ctx, assetID)) {
@@ -158,7 +162,11 @@ public final class AssetTransfer implements ContractInterface {
             System.out.println(errorMessage);
             throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
         }
-
+        Asset asset = ReadAsset(ctx, assetID);
+        String clientId = ctx.getClientIdentity().getId();
+        if (!clientId.equals(asset.getOwner())) {
+            throw new ChaincodeException("auth failed, " + clientId + " cannot update " + asset.getOwner() + "'s asset");
+        }
         stub.delState(assetID);
     }
 
@@ -188,38 +196,20 @@ public final class AssetTransfer implements ContractInterface {
     @Transaction(intent = Transaction.TYPE.SUBMIT)
     public String TransferAsset(final Context ctx, final String assetID, final String newOwner) {
         ChaincodeStub stub = ctx.getStub();
-        String assetJSON = stub.getStringState(assetID);
-
-        if (assetJSON == null || assetJSON.isEmpty()) {
-            String errorMessage = String.format("Asset %s does not exist", assetID);
-            System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
+        Asset asset = ReadAsset(ctx, assetID);
+        ctx.getClientIdentity().
+        String clientId = ctx.getClientIdentity().getId();
+        if (!clientId.equals(asset.getOwner())) {
+            throw new ChaincodeException("auth failed, " + clientId + " cannot transfer " + asset.getOwner() + "'s asset");
         }
-
-        Asset asset = genson.deserialize(assetJSON, Asset.class);
 
         String aWalletAssertId = asset.getOwner() + "-wallet";
         String bWalletAssertId = newOwner + "-wallet";
 
-        final String aWalletAssetJSON = stub.getStringState(aWalletAssertId);
-        final String bWalletAssetJSON = stub.getStringState(bWalletAssertId);
-
-        if (bWalletAssetJSON == null || bWalletAssetJSON.isEmpty()) {
-            String errorMessage = String.format("Asset %s does not exist", bWalletAssertId);
-            System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
-        }
-
-        if (aWalletAssetJSON == null || aWalletAssetJSON.isEmpty()) {
-            String errorMessage = String.format("Asset %s does not exist", aWalletAssertId);
-            System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
-        }
-
-        Asset aWalletAsset = genson.deserialize(aWalletAssetJSON, Asset.class);
-        Asset bWalletAsset = genson.deserialize(bWalletAssetJSON, Asset.class);
+        Asset aWalletAsset = ReadAsset(ctx, aWalletAssertId);
+        Asset bWalletAsset = ReadAsset(ctx, bWalletAssertId);
         if (bWalletAsset.getPrice().compareTo(asset.getPrice()) < 0) {
-            throw new ChaincodeException(newOwner + " 资金账户不足，余额还剩余：" + bWalletAsset.getPrice() + "，购买" + asset.getType() + " 需要" + asset.getPrice());
+            throw new ChaincodeException(newOwner + "'s capital account is insufficient, and the account balance is remaining: " + bWalletAsset.getPrice() + ", the account needs at least " + asset.getPrice());
         }
 
         Asset newAsset = new Asset(asset.getAssetID(), asset.getType(), asset.getPrice(), newOwner);
@@ -238,11 +228,17 @@ public final class AssetTransfer implements ContractInterface {
         String aWalletNewJSON = genson.serialize(aWalletNewAsset);
         stub.putStringState(aWalletAsset.getAssetID(), aWalletNewJSON);
 
-        System.out.println("货物: [assetId: " + asset.getAssetID() + ", type: " + asset.getType() + ", price: " + asset.getPrice() + "]");
-        System.out.println("已由owner: " + asset.getOwner() + "转移给" + newOwner);
-        System.out.println(asset.getOwner() + "当前余额: " + aWalletAsset.getPrice());
-        System.out.println(newOwner + "当前余额: " + bWalletAsset.getPrice());
-        return asset.getOwner();
+        System.out.println("goods: [assetId: " + asset.getAssetID() + ", type: " + asset.getType() + ", price: " + asset.getPrice() + "]");
+        System.out.println("owner: " + asset.getOwner() + " --> " + newOwner);
+        System.out.println(asset.getOwner() + " Account balance: " + aWalletAsset.getPrice());
+        System.out.println(newOwner + " Account balance: " + bWalletAsset.getPrice());
+
+        String returnMsg = "\ngoods: [assetId: " + asset.getAssetID() + ", type: " + asset.getType() + ", price: "
+                            + asset.getPrice() + "]\n"
+                            + "owner: " + asset.getOwner() + " --> " + newOwner + "\n"
+                            + asset.getOwner() + " Account balance: " + aWalletAsset.getPrice() + "\n"
+                            + newOwner + " Account balance: " + bWalletAsset.getPrice() + "\n";
+        return returnMsg;
     }
 
     /**
