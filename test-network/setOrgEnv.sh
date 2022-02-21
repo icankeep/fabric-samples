@@ -19,6 +19,7 @@ ORDERER_CA=${DIR}/test-network/organizations/ordererOrganizations/example.com/or
 PEER0_ORG1_CA=${DIR}/test-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
 PEER0_ORG2_CA=${DIR}/test-network/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
 PEER0_ORG3_CA=${DIR}/test-network/organizations/peerOrganizations/org3.example.com/peers/peer0.org3.example.com/tls/ca.crt
+PEER0_ORG4_CA=${DIR}/test-network/organizations/peerOrganizations/org4.example.com/peers/peer0.org4.example.com/tls/ca.crt
 
 
 if [[ ${ORG,,} == "org1" || ${ORG,,} == "digibank" ]]; then
@@ -51,6 +52,7 @@ echo "ORDERER_CA=${ORDERER_CA}"
 echo "PEER0_ORG1_CA=${PEER0_ORG1_CA}"
 echo "PEER0_ORG2_CA=${PEER0_ORG2_CA}"
 echo "PEER0_ORG3_CA=${PEER0_ORG3_CA}"
+echo "PEER0_ORG4_CA=${PEER0_ORG4_CA}"
 
 echo "CORE_PEER_MSPCONFIGPATH=${CORE_PEER_MSPCONFIGPATH}"
 echo "CORE_PEER_ADDRESS=${CORE_PEER_ADDRESS}"

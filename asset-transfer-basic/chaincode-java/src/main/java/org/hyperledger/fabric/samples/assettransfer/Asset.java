@@ -4,6 +4,7 @@
 
 package org.hyperledger.fabric.samples.assettransfer;
 
+import java.math.BigDecimal;
 import java.util.Objects;
 
 import org.hyperledger.fabric.contract.annotation.DataType;
@@ -18,45 +19,36 @@ public final class Asset {
     private final String assetID;
 
     @Property()
-    private final String color;
+    private final String type;
 
     @Property()
-    private final int size;
+    private final BigDecimal price;
 
     @Property()
     private final String owner;
-
-    @Property()
-    private final int appraisedValue;
 
     public String getAssetID() {
         return assetID;
     }
 
-    public String getColor() {
-        return color;
+    public String getType() {
+        return type;
     }
 
-    public int getSize() {
-        return size;
+    public BigDecimal getPrice() {
+        return price;
     }
 
     public String getOwner() {
         return owner;
     }
 
-    public int getAppraisedValue() {
-        return appraisedValue;
-    }
-
-    public Asset(@JsonProperty("assetID") final String assetID, @JsonProperty("color") final String color,
-            @JsonProperty("size") final int size, @JsonProperty("owner") final String owner,
-            @JsonProperty("appraisedValue") final int appraisedValue) {
+    public Asset(@JsonProperty("assetID") final String assetID, @JsonProperty("type") final String type,
+            @JsonProperty("price") final BigDecimal price, @JsonProperty("owner") final String owner) {
         this.assetID = assetID;
-        this.color = color;
-        this.size = size;
+        this.type = type;
+        this.price = price;
         this.owner = owner;
-        this.appraisedValue = appraisedValue;
     }
 
     @Override
@@ -72,22 +64,22 @@ public final class Asset {
         Asset other = (Asset) obj;
 
         return Objects.deepEquals(
-                new String[] {getAssetID(), getColor(), getOwner()},
-                new String[] {other.getAssetID(), other.getColor(), other.getOwner()})
+                new String[] {getAssetID(), getType(), getOwner()},
+                new String[] {other.getAssetID(), other.getType(), other.getOwner()})
                 &&
                 Objects.deepEquals(
-                new int[] {getSize(), getAppraisedValue()},
-                new int[] {other.getSize(), other.getAppraisedValue()});
+                        new BigDecimal[] {getPrice()},
+                        new BigDecimal[] {other.getPrice()});
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(getAssetID(), getColor(), getSize(), getOwner(), getAppraisedValue());
+        return Objects.hash(getAssetID(), getType(), getPrice(), getOwner());
     }
 
     @Override
     public String toString() {
-        return this.getClass().getSimpleName() + "@" + Integer.toHexString(hashCode()) + " [assetID=" + assetID + ", color="
-                + color + ", size=" + size + ", owner=" + owner + ", appraisedValue=" + appraisedValue + "]";
+        return this.getClass().getSimpleName() + "@" + Integer.toHexString(hashCode()) + " [assetID=" + assetID + ", type="
+                + type + ", price=" + price + ", owner=" + owner + "]";
     }
 }
