@@ -55,14 +55,13 @@ public final class AssetTransfer implements ContractInterface {
     @Transaction(intent = Transaction.TYPE.SUBMIT)
     public void InitLedger(final Context ctx) {
         ChaincodeStub stub = ctx.getStub();
-
-        CreateAsset(ctx, "A-wallet", "money", new BigDecimal("5000.0"), "peer0.org3");
-        CreateAsset(ctx, "B-wallet", "money", new BigDecimal("5000.0"), "peer1.org3");
-        CreateAsset(ctx, "asset1", "water", new BigDecimal("1000.0"), "peer0.org3");
-        CreateAsset(ctx, "asset3", "medicine", new BigDecimal("6000.0"), "peer0.org3");
-        CreateAsset(ctx, "asset2", "clothes", new BigDecimal("2000.0"), "peer1.org3");
-        CreateAsset(ctx, "asset5", "glass", new BigDecimal("4000.0"), "peer0.org2");
-        CreateAsset(ctx, "asset6", "desk", new BigDecimal("3000.0"), "peer0.org1");
+        CreateAsset(ctx, "usera@org3.example.com-wallet", "money", new BigDecimal("5000.0"), "usera@org3.example.com");
+        CreateAsset(ctx, "userb@org3.example.com-wallet", "money", new BigDecimal("5000.0"), "userb@org3.example.com");
+        CreateAsset(ctx, "asset1", "water", new BigDecimal("1000.0"), "usera@org3.example.com");
+        CreateAsset(ctx, "asset3", "medicine", new BigDecimal("6000.0"), "usera@org3.example.com");
+        CreateAsset(ctx, "asset2", "clothes", new BigDecimal("2000.0"), "userb@org3.example.com");
+        CreateAsset(ctx, "asset5", "glass", new BigDecimal("4000.0"), "User1@org1.example.com");
+        CreateAsset(ctx, "asset6", "desk", new BigDecimal("3000.0"), "User1@org2.example.com");
 
     }
 
@@ -113,6 +112,10 @@ public final class AssetTransfer implements ContractInterface {
         }
 
         Asset asset = genson.deserialize(assetJSON, Asset.class);
+
+        // 鉴权
+        currentClientIsOwner(ctx, asset.getOwner());
+
         return asset;
     }
 
@@ -128,17 +131,9 @@ public final class AssetTransfer implements ContractInterface {
      */
     @Transaction(intent = Transaction.TYPE.SUBMIT)
     public Asset UpdateAsset(final Context ctx, final String assetID, final String type, final BigDecimal price, final String owner) {
-        String clientId = ctx.getClientIdentity().getId();
-        if (!clientId.equals(owner)) {
-            throw new ChaincodeException("auth failed, " + clientId + " cannot update " + owner + "'s asset");
-        }
         ChaincodeStub stub = ctx.getStub();
 
-        if (!AssetExists(ctx, assetID)) {
-            String errorMessage = String.format("Asset %s does not exist", assetID);
-            System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
-        }
+        ReadAsset(ctx, assetID);
 
         Asset newAsset = new Asset(assetID, type, price, owner);
         //Use Genson to convert the Asset into string, sort it alphabetically and serialize it into a json string
@@ -162,11 +157,8 @@ public final class AssetTransfer implements ContractInterface {
             System.out.println(errorMessage);
             throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
         }
-        Asset asset = ReadAsset(ctx, assetID);
-        String clientId = ctx.getClientIdentity().getId();
-        if (!clientId.equals(asset.getOwner())) {
-            throw new ChaincodeException("auth failed, " + clientId + " cannot update " + asset.getOwner() + "'s asset");
-        }
+
+        ReadAsset(ctx, assetID);
         stub.delState(assetID);
     }
 
@@ -197,11 +189,6 @@ public final class AssetTransfer implements ContractInterface {
     public String TransferAsset(final Context ctx, final String assetID, final String newOwner) {
         ChaincodeStub stub = ctx.getStub();
         Asset asset = ReadAsset(ctx, assetID);
-        ctx.getClientIdentity().
-        String clientId = ctx.getClientIdentity().getId();
-        if (!clientId.equals(asset.getOwner())) {
-            throw new ChaincodeException("auth failed, " + clientId + " cannot transfer " + asset.getOwner() + "'s asset");
-        }
 
         String aWalletAssertId = asset.getOwner() + "-wallet";
         String bWalletAssertId = newOwner + "-wallet";
@@ -268,5 +255,25 @@ public final class AssetTransfer implements ContractInterface {
         final String response = genson.serialize(queryResults);
 
         return response;
+    }
+
+    private static void currentClientIsOwner(final Context ctx, final String owner) {
+
+        final String clientId = ctx.getClientIdentity().getId();
+        if (owner == null || owner.isEmpty()) {
+            throw new ChaincodeException("auth failed, owner is " + owner + ", but current client is " + clientId);
+        }
+        // e.g. usera@org3.example.com
+        final String[] tmp = owner.split("@");
+
+        if (tmp.length != 2) {
+            throw new ChaincodeException("auth failed, owner is " + owner + ", but current client is " + clientId);
+        }
+
+        if (clientId.contains("::CN=" + tmp[0]) && clientId.contains("::CN=ca." + tmp[1])) {
+            return;
+        }
+
+        throw new ChaincodeException("auth failed, owner is " + owner + ", but current client is " + clientId);
     }
 }

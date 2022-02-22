@@ -1,0 +1,8 @@
++ res=0
+{
+        "approvals": {
+                "Org1MSP": true,
+                "Org2MSP": false,
+                "Org3MSP": false
+        }
+}
