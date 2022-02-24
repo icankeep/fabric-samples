@@ -7,6 +7,8 @@ package org.hyperledger.fabric.samples.assettransfer;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 
 import org.hyperledger.fabric.contract.Context;
@@ -41,6 +43,8 @@ import com.owlike.genson.Genson;
 public final class AssetTransfer implements ContractInterface {
 
     private final Genson genson = new Genson();
+
+    private final static Pattern pattern = Pattern.compile("x509::CN=([^,]*),.*C=US::CN=ca\\.([^,]*), O=org3.example.com, L=Raleigh, ST=North Carolina, C=US");
 
     private enum AssetTransferErrors {
         ASSET_NOT_FOUND,
@@ -94,6 +98,86 @@ public final class AssetTransfer implements ContractInterface {
     }
 
     /**
+     * Creates a new order on the ledger.
+     * @param ctx the transaction context
+     * @param purchaser the purchaser of the asset
+     * @param business the business of the asset
+     * @param assetId the ID of the asset
+     * @return
+     */
+    @Transaction(intent = Transaction.TYPE.SUBMIT)
+    public Order CreateOrder(final Context ctx,
+                             final String purchaser,
+                             final String business,
+                             final String assetId) {
+        ChaincodeStub stub = ctx.getStub();
+
+        String orderId = getNewOrderId(assetId, purchaser);
+
+        if (AssetExists(ctx, orderId)) {
+            String errorMessage = String.format("orderId %s already exists", orderId);
+            System.out.println(errorMessage);
+            throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_ALREADY_EXISTS.toString());
+        }
+
+        Order order = new Order(orderId, purchaser, business, assetId, false);
+        //Use Genson to convert the Asset into string, sort it alphabetically and serialize it into a json string
+        String sortedJson = genson.serialize(order);
+        stub.putStringState(orderId, sortedJson);
+
+        return order;
+    }
+
+    /**
+     * Retrieves an order with the specified ID from the ledger.
+     * @param ctx
+     * @param orderId
+     * @return
+     */
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public Order ReadOrder(final Context ctx, final String orderId) {
+        ChaincodeStub stub = ctx.getStub();
+        String orderJSON = stub.getStringState(orderId);
+
+        if (orderJSON == null || orderJSON.isEmpty()) {
+            String errorMessage = String.format("orderId %s does not exist", orderId);
+            System.out.println(errorMessage);
+            throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
+        }
+
+        return genson.deserialize(orderJSON, Order.class);
+    }
+
+    @Transaction(intent = Transaction.TYPE.SUBMIT)
+    public Order ConfirmOrder(final Context ctx, final String orderId) {
+        Order order = ReadOrder(ctx, orderId);
+        if (order.isConfirm()) {
+            throw new ChaincodeException("order has been confirmed.");
+        }
+
+        // 鉴权
+        auth(ctx, order.getBusiness());
+
+        Asset asset = ReadAsset(ctx, order.getAssetId());
+        Asset walletAsset = getUserWallet(ctx);
+
+        Asset newAsset = new Asset(walletAsset.getAssetID(), walletAsset.getType(), walletAsset.getPrice().add(asset.getPrice()), walletAsset.getOwner());
+        //Use Genson to convert the Asset into string, sort it alphabetically and serialize it into a json string
+        String sortedJson = genson.serialize(newAsset);
+        ctx.getStub().putStringState(walletAsset.getAssetID(), sortedJson);
+
+        newAsset = new Asset(asset.getAssetID(), asset.getType(), asset.getPrice(), order.getPurchaser());
+        //Use Genson to convert the Asset into string, sort it alphabetically and serialize it into a json string
+        sortedJson = genson.serialize(newAsset);
+        ctx.getStub().putStringState(walletAsset.getAssetID(), sortedJson);
+
+        Order newOrder = new Order(orderId, order.getPurchaser(), order.getBusiness(), order.getAssetId(), true);
+        sortedJson = genson.serialize(newOrder);
+        ctx.getStub().putStringState(orderId, sortedJson);
+        return newOrder;
+    }
+
+    /**
      * Retrieves an asset with the specified ID from the ledger.
      *
      * @param ctx the transaction context
@@ -113,9 +197,6 @@ public final class AssetTransfer implements ContractInterface {
 
         Asset asset = genson.deserialize(assetJSON, Asset.class);
 
-        // 鉴权
-        currentClientIsOwner(ctx, asset.getOwner());
-
         return asset;
     }
 
@@ -133,7 +214,10 @@ public final class AssetTransfer implements ContractInterface {
     public Asset UpdateAsset(final Context ctx, final String assetID, final String type, final BigDecimal price, final String owner) {
         ChaincodeStub stub = ctx.getStub();
 
-        ReadAsset(ctx, assetID);
+        Asset asset = ReadAsset(ctx, assetID);
+
+        // 鉴权
+        auth(ctx, asset.getOwner());
 
         Asset newAsset = new Asset(assetID, type, price, owner);
         //Use Genson to convert the Asset into string, sort it alphabetically and serialize it into a json string
@@ -158,7 +242,10 @@ public final class AssetTransfer implements ContractInterface {
             throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
         }
 
-        ReadAsset(ctx, assetID);
+        Asset asset = ReadAsset(ctx, assetID);
+        // 鉴权
+        auth(ctx, asset.getOwner());
+
         stub.delState(assetID);
     }
 
@@ -175,6 +262,41 @@ public final class AssetTransfer implements ContractInterface {
         String assetJSON = stub.getStringState(assetID);
 
         return (assetJSON != null && !assetJSON.isEmpty());
+    }
+
+    @Transaction(intent = Transaction.TYPE.SUBMIT)
+    public String BuyAsset(final Context ctx, final String assetID) {
+        ChaincodeStub stub = ctx.getStub();
+        final String currentUser = getCurrentUser(ctx);
+        Asset asset = ReadAsset(ctx, assetID);
+
+        Asset bWalletAsset = getUserWallet(ctx);
+
+        if (bWalletAsset.getPrice().compareTo(asset.getPrice()) < 0) {
+            throw new ChaincodeException(asset.getOwner() + "'s capital account is insufficient, and the account balance is remaining: " + bWalletAsset.getPrice() + ", the account needs at least " + asset.getPrice());
+        }
+
+        // 暂时忽略一致性
+        // b账户减去金额
+        Asset newAsset = new Asset(bWalletAsset.getAssetID(), bWalletAsset.getType(), bWalletAsset.getPrice().subtract(asset.getPrice()), asset.getOwner());
+        //Use Genson to convert the Asset into string, sort it alphabetically and serialize it into a json string
+        String sortedJson = genson.serialize(newAsset);
+        stub.putStringState(bWalletAsset.getAssetID(), sortedJson);
+
+        String orderId = getNewOrderId(assetID, currentUser);
+
+        if (AssetExists(ctx, orderId)) {
+            String errorMessage = String.format("orderId %s already exists", orderId);
+            System.out.println(errorMessage);
+            throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_ALREADY_EXISTS.toString());
+        }
+
+        Order order = new Order(orderId, currentUser, asset.getOwner(), assetID, false);
+        //Use Genson to convert the Asset into string, sort it alphabetically and serialize it into a json string
+        sortedJson = genson.serialize(order);
+        stub.putStringState(orderId, sortedJson);
+
+        return "create order successfully, orderId: " + order.getOrderId();
     }
 
     /**
@@ -257,23 +379,28 @@ public final class AssetTransfer implements ContractInterface {
         return response;
     }
 
-    private static void currentClientIsOwner(final Context ctx, final String owner) {
-
-        final String clientId = ctx.getClientIdentity().getId();
-        if (owner == null || owner.isEmpty()) {
-            throw new ChaincodeException("auth failed, owner is " + owner + ", but current client is " + clientId);
+    private static void auth(final Context ctx, final String owner) {
+        String currentUser = getCurrentUser(ctx);
+        if (!currentUser.equals(owner)) {
+            throw new IllegalArgumentException("current user is " + currentUser + ", no permission to operate the assets of " + owner);
         }
-        // e.g. usera@org3.example.com
-        final String[] tmp = owner.split("@");
+    }
 
-        if (tmp.length != 2) {
-            throw new ChaincodeException("auth failed, owner is " + owner + ", but current client is " + clientId);
+    private static String getCurrentUser(final Context ctx) {
+        Matcher matcher = pattern.matcher(ctx.getClientIdentity().getId());
+        matcher.find();
+        if (matcher.matches()) {
+            return matcher.group(1) + "@" + matcher.group(2);
         }
+        return "";
+    }
 
-        if (clientId.contains("::CN=" + tmp[0]) && clientId.contains("::CN=ca." + tmp[1])) {
-            return;
-        }
+    private Asset getUserWallet(final Context ctx) {
+        String user = getCurrentUser(ctx);
+        return ReadAsset(ctx, user + "-wallet");
+    }
 
-        throw new ChaincodeException("auth failed, owner is " + owner + ", but current client is " + clientId);
+    private String getNewOrderId(String assetId, String purchaser) {
+        return assetId + "-" + purchaser + "-" + System.currentTimeMillis();
     }
 }
